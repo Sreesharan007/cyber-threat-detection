@@ -2,9 +2,6 @@ import streamlit as st
 import random
 import time
 import pandas as pd
-from gtts import gTTS
-import tempfile
-import os
 from datetime import datetime
 import requests
 
@@ -34,7 +31,7 @@ if "user_id" not in st.session_state:
     st.session_state.user_id = f"user_{random.randint(1000, 9999)}"
 
 # =====================================================
-# UTILITY FUNCTIONS
+# UTILITY FUNCTIONS - CLOUD READY
 # =====================================================
 @st.cache_data(ttl=5)
 def detect_attack_cached():
@@ -50,26 +47,29 @@ def get_ip_info(ip):
         return {}
 
 def speak_attack(attack):
-    """Voice alert with cleanup"""
+    """Browser-native speech synthesis - Works on ALL clouds!"""
     messages = {
         "Malware": "Warning. Malware detected. Harmful program running. Files may be stolen or damaged.",
-        "Ransomware": "Warning. Ransomware detected. Files locked. Disconnect immediately.",
+        "Ransomware": "Warning. Ransomware detected. Files locked. Disconnect network immediately.",
         "Brute Force": "Warning. Brute force attack. Password guessing detected. Change password now.",
-        "DDoS": "Warning. DDoS attack. Network flooding detected. Block source IP immediately."
+        "DDoS": "Warning. DDoS attack. Network flooding detected. Block source IP."
     }
     
     if attack not in messages:
         return
     
-    try:
-        tts = gTTS(text=messages[attack], lang="en", slow=False)
-        audio_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-        tts.save(audio_file.name)
-        st.audio(audio_file.name)
-        time.sleep(1)  # Let audio load
-        os.unlink(audio_file.name)  # Clean up
-    except:
-        st.warning("🔊 Audio unavailable - browser may be blocking autoplay")
+    # Button triggers native browser TTS
+    if st.button(f"🔊 **Play Voice Alert: {attack}**", key=f"voice_{attack}"):
+        st.markdown(f"""
+        <script>
+        let utterance = new SpeechSynthesisUtterance('{messages[attack]}');
+        utterance.rate = 0.9;
+        utterance.volume = 1;
+        speechSynthesis.speak(utterance);
+        </script>
+        """, unsafe_allow_html=True)
+    
+    st.info(messages[attack])  # Text backup
 
 def confidence_score(attack):
     """AI confidence with learning"""
@@ -100,39 +100,43 @@ network_attackers = [
 # =====================================================
 st.sidebar.title("👤 User Panel")
 st.sidebar.info(f"**User ID:** `{st.session_state.user_id}`")
-if st.sidebar.button("🔄 New Session"):
+
+if st.sidebar.button("🔄 **New Session**", use_container_width=True):
     st.session_state.history = []
     st.session_state.attack_memory = {"Malware": 0, "Ransomware": 0, "Brute Force": 0, "DDoS": 0}
+    st.session_state.network_info = None
     st.rerun()
 
 st.sidebar.title("🌐 Network Monitor")
 if st.session_state.network_info:
     info = st.session_state.network_info
     st.sidebar.error("🚨 **ATTACK ACTIVE**")
-    with st.sidebar.expander(f"👤 Attacker: {info['ip']}"):
-        st.markdown(f"**Location:** {info['city']}, {info['country']}")
-        st.markdown(f"**ISP:** {info['isp']}")
-        st.code(f"iptables -A INPUT -s {info['ip']} -j DROP", language="bash")
+    with st.sidebar.expander(f"👤 Attacker Details: {info['ip']}"):
+        st.markdown(f"**📍 Location:** {info['city']}, {info['country']}")
+        st.markdown(f"**🌐 ISP:** {info['isp']}")
+        st.code(f"iptables -A INPUT -s {info['ip']} -j DROP\nufw deny from {info['ip']}", language="bash")
 else:
-    st.sidebar.success("🟢 Network: Clean")
+    st.sidebar.success("🟢 **Network: CLEAN**")
 
 # =====================================================
 # MAIN HEADER
 # =====================================================
 st.title("🛡️ AI Security Assistant Pro")
-st.markdown("**Real-time threat detection with adaptive learning & voice alerts**")
+st.markdown("**Real-time threat detection • Adaptive learning • Voice alerts • Multi-user ready**")
 
 # Control buttons
 col1, col2, col3 = st.columns([1, 1, 1])
 with col1:
     if st.button("▶️ **START SCAN**", type="primary", use_container_width=True):
         st.session_state.scanning = True
+        st.rerun()
 with col2:
     if st.button("⏹️ **STOP SCAN**", use_container_width=True):
         st.session_state.scanning = False
+        st.rerun()
 with col3:
     if st.button("📊 **VIEW STATS**", use_container_width=True):
-        st.session_state.show_stats = True
+        st.session_state.show_stats = not st.session_state.get("show_stats", False)
 
 # =====================================================
 # SCANNING LOOP - OPTIMIZED
@@ -145,55 +149,61 @@ progress_bar = st.empty()
 if st.session_state.scanning:
     progress_bar.progress(0)
     
-    with st.spinner("Scanning system..."):
+    with st.spinner("🔍 Scanning system files and network..."):
         attack = detect_attack_cached()
         confidence, reason = confidence_score(attack)
         
-        # Update memory
+        # Update memory for threats only
         if attack != "Normal":
             st.session_state.attack_memory[attack] = st.session_state.attack_memory.get(attack, 0) + 1
         
-        # Voice alert on change
-        if attack != st.session_state.last_attack:
+        # Voice alert on new threat type
+        if attack != st.session_state.last_attack and attack != "Normal":
             speak_attack(attack)
             st.session_state.last_attack = attack
         
         timestamp = datetime.now().strftime("%H:%M:%S")
         
-        # Network attacks
+        # Network attacks get attacker details
         if attack in ["Brute Force", "DDoS"]:
             attacker = random.choice(network_attackers)
             ip_info = get_ip_info(attacker["ip"])
             st.session_state.network_info = {
-                "attack": attack, "ip": attacker["ip"],
+                "attack": attack, 
+                "ip": attacker["ip"],
                 "city": ip_info.get("city", attacker["city"]),
                 "country": ip_info.get("country", attacker["country"]),
                 "isp": ip_info.get("isp", attacker["isp"])
             }
         
-        # Status display
+        # Dynamic status display
         if attack == "Normal":
             status_box.success(f"✅ **SYSTEM SECURE** | {timestamp}")
-            info_box.info(f"**Confidence:** {confidence}% | {reason}")
+            info_box.info(f"**AI Confidence:** {confidence}% | {reason}")
         
         else:
             status_box.error(f"🚨 **{attack} DETECTED** | {timestamp}")
             info_box.warning(f"**AI Confidence:** **{confidence}%** | {reason}")
             
-            # Action buttons
+            col_action1, col_action2 = st.columns(2)
+            
             if attack == "Malware":
                 file = random.choice(malicious_files)
-                if st.button(f"🧹 **Quarantine {file}**"):
-                    action_box.success(f"✅ **{file}** isolated & deleted")
+                with col_action1:
+                    if st.button(f"🧹 **Quarantine {file[:20]}...**"):
+                        action_box.success(f"✅ **{file}** isolated & deleted from quarantine")
             
             elif attack == "Ransomware":
-                action_box.error("🔴 **EMERGENCY**: Disconnect network. Restore from backup.")
+                action_box.error("🔴 **CRITICAL**: Disconnect network NOW. Restore from backup.")
             
             elif attack in ["Brute Force", "DDoS"]:
-                if st.button("🚫 **BLOCK IP NOW**", type="primary"):
-                    action_box.success(f"✅ IP `{st.session_state.network_info['ip']}` BLOCKED")
+                with col_action1:
+                    if st.button("🚫 **BLOCK ATTACKER IP**", type="primary"):
+                        action_box.success(f"✅ **{st.session_state.network_info['ip']}** BLOCKED permanently")
+                with col_action2:
+                    speak_attack(attack)  # Quick voice option
         
-        # Log history
+        # Log to history
         st.session_state.history.append({
             "Time": timestamp,
             "User": st.session_state.user_id[:8],
@@ -207,10 +217,10 @@ if st.session_state.scanning:
     st.rerun()
 
 # =====================================================
-# HISTORY & EXPORTS
+# HISTORY & ANALYTICS
 # =====================================================
 st.divider()
-st.subheader("📜 Attack History")
+st.subheader("📜 Attack History & Analytics")
 
 if st.session_state.history:
     df = pd.DataFrame(st.session_state.history[-50:])  # Last 50 entries
@@ -220,25 +230,33 @@ if st.session_state.history:
         st.dataframe(df, use_container_width=True, hide_index=True)
     with col2:
         st.download_button(
-            "📥 Download CSV", 
+            "📥 **Download Logs CSV**", 
             df.to_csv(index=False),
-            "security_logs.csv",
-            "text/csv"
+            "security_incident_logs.csv",
+            "text/csv",
+            use_container_width=True
         )
     
-    # Stats
-    attack_counts = df['Attack'].value_counts()
-    st.metric("Total Alerts", len(df))
-    col_stats1, col_stats2 = st.columns(2)
+    # Live stats
+    st.markdown("---")
+    col_stats1, col_stats2, col_stats3 = st.columns(3)
     with col_stats1:
-        st.metric("Unique Threats", len(attack_counts))
+        st.metric("📊 Total Scans", len(df))
     with col_stats2:
+        threats = len(df[df['Attack'] != 'Normal'])
+        st.metric("🚨 Threats Found", threats)
+    with col_stats3:
         avg_conf = df['Confidence'].str.rstrip('%').astype(float).mean()
-        st.metric("Avg Confidence", f"{avg_conf:.1f}%")
+        st.metric("🎯 Detection Accuracy", f"{avg_conf:.1f}%")
         
 else:
-    st.info("👆 **Start scanning** to see attack history")
+    st.info("👆 **Click START SCAN** to begin monitoring your system")
 
-# Footer
+# =====================================================
+# FOOTER
+# =====================================================
 st.markdown("---")
-st.caption("🛡️ AI Security Assistant Pro | Optimized for Cloud Deployment")
+st.markdown(
+    "🛡️ **AI Security Assistant Pro** | "
+    "Cloud-Ready • Multi-User • Voice Alerts • Real-time Analytics"
+)
